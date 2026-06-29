@@ -20,15 +20,20 @@ export default async function DashboardPage() {
     redirect("/");
   }
 
-  // Fetch user and session data
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email },
-    include: {
-      sessions: {
-        orderBy: { createdAt: "desc" },
+  // Fetch user and session data safely (prevent crashes in serverless environment)
+  let user = null;
+  try {
+    user = await prisma.user.findUnique({
+      where: { email: session.user.email },
+      include: {
+        sessions: {
+          orderBy: { createdAt: "desc" },
+        },
       },
-    },
-  });
+    });
+  } catch (error) {
+    console.warn("Failed to fetch user database sessions (Vercel SQLite fallback):", error);
+  }
 
   const dbSessions = user?.sessions || [];
   const totalSessions = dbSessions.length;

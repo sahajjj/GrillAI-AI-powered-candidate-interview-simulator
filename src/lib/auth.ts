@@ -18,27 +18,37 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         if (!credentials?.email) return null;
         
-        // Developer login / fallback when Google is not set up
         const email = credentials.email;
         const name = credentials.name || "Candidate One";
         
-        // Upsert developer user
-        const user = await prisma.user.upsert({
-          where: { email },
-          update: { name },
-          create: {
-            email,
-            name,
-            avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(name)}`,
-          },
-        });
-        
-        return {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          image: user.avatar,
-        };
+        try {
+          // Upsert developer user
+          const user = await prisma.user.upsert({
+            where: { email },
+            update: { name },
+            create: {
+              email,
+              name,
+              avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(name)}`,
+            },
+          });
+          
+          return {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            image: user.avatar,
+          };
+        } catch (error) {
+          console.warn("Database unavailable during sign in (Vercel read-only SQLite fallback):", error);
+          // Return a mock user object directly so authentication works on Vercel serverless functions
+          return {
+            id: "mock-vercel-user-id-" + Date.now(),
+            name: name,
+            email: email,
+            image: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(name)}`,
+          };
+        }
       },
     }),
   ],
@@ -68,8 +78,12 @@ export const authOptions: NextAuthOptions = {
         user.id = dbUser.id;
         return true;
       } catch (error) {
-        console.error("Error signing in user to database:", error);
-        return true; // Still allow authentication but log error
+        console.warn("Prisma callback upsert bypassed:", error);
+        // Ensure user has a valid fallback id so session doesn't fail
+        if (!user.id) {
+          user.id = "mock-vercel-user-id-" + Date.now();
+        }
+        return true; // Allow sign in to succeed on Vercel
       }
     },
     async jwt({ token, user }) {

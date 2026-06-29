@@ -9,8 +9,17 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "var(--background)",
-        foreground: "var(--foreground)",
+        background: "#000000",
+        foreground: "#f4f4f5",
+        brand: {
+          orange: "#f97316",
+          glow: "rgba(249, 115, 22, 0.12)",
+          coral: "#fb923c",
+        },
+      },
+      fontFamily: {
+        sans: ["var(--font-inter)", "sans-serif"],
+        mono: ["var(--font-jetbrains)", "monospace"],
       },
     },
   },

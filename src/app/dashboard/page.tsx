@@ -1,57 +1,123 @@
-import React from "react";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
-import { redirect } from "next/navigation";
-import prisma from "@/lib/prisma";
+"use client";
+
+import React, { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import ScoreChart from "@/components/ScoreChart";
 import SessionList from "@/components/SessionList";
-import { Terminal, Activity, Play } from "lucide-react";
+import { Terminal, Activity, Play, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import LogoutButton from "@/components/LogoutButton";
 
-export const dynamic = "force-dynamic";
+interface SessionData {
+  id: string;
+  role: string;
+  type: string;
+  difficulty: string;
+  overallScore: number;
+  communication: number;
+  technicalDepth: number;
+  clarity: number;
+  confidence: number;
+  createdAt: string;
+}
 
-export default async function DashboardPage() {
-  const session = await getServerSession(authOptions);
+export default function DashboardPage() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
+  const [sessions, setSessions] = useState<SessionData[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Redirect to landing if not logged in
-  if (!session || !session.user?.email) {
-    redirect("/");
+  // Redirect if unauthenticated
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.push("/");
+    }
+  }, [status, router]);
+
+  // Load and merge database + local storage sessions
+  useEffect(() => {
+    if (status !== "authenticated" || !session?.user?.email) return;
+
+    const fetchSessions = async () => {
+      try {
+        // 1. Fetch DB sessions
+        const res = await fetch("/api/user/sessions");
+        const dbData: SessionData[] = res.ok ? await res.json() : [];
+
+        // 2. Fetch local storage sessions
+        let localData: SessionData[] = [];
+        try {
+          const localRaw = localStorage.getItem("grill_local_sessions");
+          if (localRaw) {
+            localData = JSON.parse(localRaw);
+          }
+        } catch (e) {
+          console.error("Failed to parse local storage sessions", e);
+        }
+
+        // 3. Merge sessions (avoiding duplicates based on id or signature)
+        const mergedMap = new Map<string, SessionData>();
+        
+        // Add DB sessions first
+        dbData.forEach((s) => mergedMap.set(s.id, s));
+
+        // Add local sessions
+        localData.forEach((s) => {
+          if (!mergedMap.has(s.id)) {
+            mergedMap.set(s.id, s);
+          }
+        });
+
+        // Convert to array and sort chronologically (newest first)
+        const sortedSessions = Array.from(mergedMap.values()).sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+
+        setSessions(sortedSessions);
+      } catch (err) {
+        console.error("Error loading sessions:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSessions();
+  }, [status, session]);
+
+  if (status === "loading" || loading) {
+    return (
+      <div className="flex flex-col min-h-screen bg-black text-white">
+        <Header />
+        <main className="flex-grow flex items-center justify-center">
+          <div className="flex flex-col items-center space-y-4">
+            <RefreshCw className="h-8 w-8 text-orange-500 animate-spin" />
+            <p className="text-zinc-500 text-xs font-semibold uppercase tracking-wider">Loading dashboard portal...</p>
+          </div>
+        </main>
+      </div>
+    );
   }
 
-  // Fetch user and session data safely (prevent crashes in serverless environment)
-  let user = null;
-  try {
-    user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-      include: {
-        sessions: {
-          orderBy: { createdAt: "desc" },
-        },
-      },
-    });
-  } catch (error) {
-    console.warn("Failed to fetch user database sessions (Vercel SQLite fallback):", error);
-  }
+  if (!session) return null;
 
-  const dbSessions = user?.sessions || [];
-  const totalSessions = dbSessions.length;
+  const totalSessions = sessions.length;
 
   // Compute stats
   const avgScore = totalSessions > 0
-    ? Number((dbSessions.reduce((sum, s) => sum + s.overallScore, 0) / totalSessions).toFixed(1))
+    ? Number((sessions.reduce((sum, s) => sum + s.overallScore, 0) / totalSessions).toFixed(1))
     : 0;
 
   const bestScore = totalSessions > 0
-    ? Number(Math.max(...dbSessions.map((s) => s.overallScore)).toFixed(1))
+    ? Number(Math.max(...sessions.map((s) => s.overallScore)).toFixed(1))
     : 0;
 
   // Calculate most practiced role
   let mostPracticedRole = "N/A";
   if (totalSessions > 0) {
     const roleCounts: Record<string, number> = {};
-    dbSessions.forEach((s) => {
+    sessions.forEach((s) => {
       const role = s.role.trim();
       roleCounts[role] = (roleCounts[role] || 0) + 1;
     });
@@ -66,7 +132,7 @@ export default async function DashboardPage() {
   }
 
   // Chart data: chronological order (oldest to newest), limited to last 10
-  const chartData = [...dbSessions]
+  const chartData = [...sessions]
     .slice(0, 10)
     .reverse()
     .map((s) => {
@@ -89,7 +155,7 @@ export default async function DashboardPage() {
           <div className="space-y-1">
             <span className="text-xs font-semibold text-orange-400 tracking-wider uppercase">Candidate Portal</span>
             <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-white uppercase">
-              Welcome back, {session.user.name || "Candidate"}
+              Welcome back, {session.user?.name || "Candidate"}
             </h2>
           </div>
 
@@ -159,7 +225,7 @@ export default async function DashboardPage() {
           </div>
 
           {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-          <SessionList sessions={dbSessions as any[]} />
+          <SessionList sessions={sessions as any[]} />
         </section>
 
       </main>

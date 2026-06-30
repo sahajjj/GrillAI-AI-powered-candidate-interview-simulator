@@ -125,6 +125,41 @@ export default function ResultsPage() {
         
         // Cache report to sessionStorage
         sessionStorage.setItem("grill_cachedReport", JSON.stringify(data));
+
+        // Save to localStorage for persistent dashboard display (read-only database bypass)
+        try {
+          const localSessionsRaw = localStorage.getItem("grill_local_sessions");
+          const localSessions = localSessionsRaw ? JSON.parse(localSessionsRaw) : [];
+          
+          // Avoid duplicates
+          const isDuplicate = localSessions.some((s: {
+            id: string;
+            role: string;
+            overallScore: number;
+            createdAt: string;
+          }) => 
+            s.id === data.id || 
+            (s.role === storedRole && Math.abs(s.overallScore - data.overallScore) < 0.01 && Date.now() - new Date(s.createdAt).getTime() < 20000)
+          );
+          
+          if (!isDuplicate) {
+            localSessions.push({
+              id: data.id || `local-${Date.now()}`,
+              role: storedRole,
+              type: storedType || "Mixed",
+              difficulty: storedDiff || "Mid",
+              overallScore: data.overallScore,
+              communication: data.communication,
+              technicalDepth: data.technicalDepth,
+              clarity: data.clarity,
+              confidence: data.confidence,
+              createdAt: new Date().toISOString()
+            });
+            localStorage.setItem("grill_local_sessions", JSON.stringify(localSessions));
+          }
+        } catch (e) {
+          console.error("Failed to save local session to localStorage", e);
+        }
         
         setLoading(false);
         toast.success("PERFORMANCE REPORT GENERATED");
